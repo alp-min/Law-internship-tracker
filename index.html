@@ -1112,7 +1112,7 @@ function MainApp({ user }) {
           </div>
         </div>
         <div style={{display:'flex',gap:5}}>
-          {[['tracker','Tracker'],['calendar','Calendar'],['timeline','Timeline']].map(([t,l]) => (
+          {[['tracker','Tracker'],['calendar','Calendar'],['timeline','Timeline'],['admin','Admin']].map(([t,l]) => (
             <button key={t} className={`hbtn ${tab===t?'active':''}`} onClick={()=>setTab(t)}>
               {l}{t==='calendar'&&soonCount>0&&<span className="badge">{soonCount}</span>}
             </button>
@@ -1128,8 +1128,125 @@ function MainApp({ user }) {
         {tab==='tracker'  && <TrackerView appState={appState} setAppState={setAppState} userId={user.id} />}
         {tab==='calendar' && <CalendarView appState={appState} />}
         {tab==='timeline' && <TimelineView appState={appState} />}
+        {tab==='admin'    && <AdminView />}
       </div>
     </>
+  );
+}
+
+/* ═══════════════════════════════════════════════
+   ADMIN VIEW
+═══════════════════════════════════════════════ */
+function AdminView() {
+  const [firms, setFirms]   = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState({});
+  const [edits, setEdits]   = useState({});
+
+  useEffect(() => { loadFlagged(); }, []);
+
+  async function loadFlagged() {
+    setLoading(true);
+    const { data } = await sb.from('firms').select('*').eq('needs_review', true).order('last_checked', { ascending: false });
+    setFirms(data || []);
+    setLoading(false);
+  }
+
+  function setEdit(id, field, val) {
+    setEdits(prev => ({ ...prev, [id]: { ...(prev[id] || {}), [field]: val } }));
+  }
+
+  function getVal(firm, field) {
+    return edits[firm.id]?.[field] ?? (firm[field] || '');
+  }
+
+  async function approve(firm) {
+    setSaving(prev => ({ ...prev, [firm.id]: true }));
+    await sb.from('firms').update({
+      opening_date: getVal(firm, 'opening_date') || null,
+      closing_date: getVal(firm, 'closing_date') || null,
+      status:       getVal(firm, 'status') || 'unknown',
+      needs_review: false,
+    }).eq('id', firm.id);
+    setFirms(prev => prev.filter(f => f.id !== firm.id));
+    setSaving(prev => ({ ...prev, [firm.id]: false }));
+  }
+
+  async function dismiss(firmId) {
+    await sb.from('firms').update({ needs_review: false }).eq('id', firmId);
+    setFirms(prev => prev.filter(f => f.id !== firmId));
+  }
+
+  if (loading) return <div style={{padding:44,textAlign:'center',fontFamily:'sans-serif',color:'var(--muted)'}}>Loading flagged firms…</div>;
+
+  return (
+    <div>
+      <div className="section-header" style={{marginBottom:14}}>
+        <div className="section-title">
+          Admin — Needs Review
+          <span style={{fontSize:13,color:'var(--muted)',fontFamily:'sans-serif',fontWeight:400,marginLeft:8}}>{firms.length} flagged</span>
+        </div>
+        <button className="filter-chip" onClick={loadFlagged}>↻ Refresh</button>
+      </div>
+      {firms.length === 0 ? (
+        <div className="empty-state"><div className="empty-icon">✓</div>All firms up to date — nothing needs review.</div>
+      ) : (
+        <div style={{display:'flex',flexDirection:'column',gap:12}}>
+          {firms.map(firm => (
+            <div key={firm.id} style={{background:'var(--card)',border:'1px solid var(--border)',borderLeft:'3px solid var(--orange)',borderRadius:12,padding:'18px 22px',boxShadow:'var(--sh)'}}>
+              <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:10}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:15,color:'var(--navy)'}} className="dark-text">{firm.name}</div>
+                  <div style={{fontFamily:'sans-serif',fontSize:11,color:'var(--muted)',marginTop:3}}>
+                    Last checked: {firm.last_checked || '—'}
+                    &ensp;·&ensp;Scraped status: <strong>{firm.status || '—'}</strong>
+                  </div>
+                </div>
+                <span style={{background:'var(--orange-bg)',color:'var(--orange)',fontFamily:'sans-serif',fontSize:10,fontWeight:700,padding:'3px 9px',borderRadius:4,whiteSpace:'nowrap'}}>⚠ REVIEW</span>
+              </div>
+
+              {firm.scrape_notes && (
+                <div style={{fontFamily:'sans-serif',fontSize:12,color:'var(--muted)',background:'var(--bg)',padding:'8px 13px',borderRadius:7,marginBottom:12,borderLeft:'3px solid var(--border)'}}>
+                  💬 {firm.scrape_notes}
+                </div>
+              )}
+
+              <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:12,marginBottom:14}}>
+                <div>
+                  <div style={{fontFamily:'sans-serif',fontSize:10,color:'var(--muted)',fontWeight:700,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.5px'}}>Opening Date</div>
+                  <input type="date" className="auth-input" style={{padding:'7px 10px',fontSize:13}}
+                    value={getVal(firm,'opening_date')} onChange={e=>setEdit(firm.id,'opening_date',e.target.value)} />
+                </div>
+                <div>
+                  <div style={{fontFamily:'sans-serif',fontSize:10,color:'var(--muted)',fontWeight:700,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.5px'}}>Closing Date</div>
+                  <input type="date" className="auth-input" style={{padding:'7px 10px',fontSize:13}}
+                    value={getVal(firm,'closing_date')} onChange={e=>setEdit(firm.id,'closing_date',e.target.value)} />
+                </div>
+                <div>
+                  <div style={{fontFamily:'sans-serif',fontSize:10,color:'var(--muted)',fontWeight:700,marginBottom:5,textTransform:'uppercase',letterSpacing:'0.5px'}}>Status</div>
+                  <select className="stage-select" style={{minWidth:'unset',width:'100%',padding:'7px 9px'}}
+                    value={getVal(firm,'status')} onChange={e=>setEdit(firm.id,'status',e.target.value)}>
+                    <option value="open">Open</option>
+                    <option value="closed">Closed</option>
+                    <option value="not_yet_open">Not Yet Open</option>
+                    <option value="unknown">Unknown</option>
+                  </select>
+                </div>
+              </div>
+
+              <div style={{display:'flex',gap:8}}>
+                <button className="auth-btn" style={{width:'auto',padding:'8px 22px',marginTop:0,fontSize:13}}
+                  onClick={()=>approve(firm)} disabled={!!saving[firm.id]}>
+                  {saving[firm.id] ? 'Saving…' : '✓ Approve & Save'}
+                </button>
+                <button className="filter-chip" style={{border:'1.5px solid var(--border)'}}
+                  onClick={()=>dismiss(firm.id)}>Dismiss</button>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }
 
