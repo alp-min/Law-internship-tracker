@@ -1141,7 +1141,33 @@ function App() {
 
   useEffect(() => {
     document.body.classList.toggle('dark', getDark());
-    sb.auth.getSession().then(({ data: { session } }) => setSession(session));
+
+    async function init() {
+      // Handle Supabase email-confirmation / magic-link callbacks
+      const url       = new URL(window.location.href);
+      const code      = url.searchParams.get('code');
+      const tokenHash = url.searchParams.get('token_hash');
+      const type      = url.searchParams.get('type');
+
+      if (code) {
+        // PKCE flow — exchange auth code for a session
+        await sb.auth.exchangeCodeForSession(code);
+      } else if (tokenHash && type) {
+        // Email OTP / token-hash flow
+        await sb.auth.verifyOtp({ token_hash: tokenHash, type });
+      }
+
+      // Strip callback params from the URL without a page reload
+      if (code || tokenHash) {
+        window.history.replaceState({}, '', window.location.pathname);
+      }
+
+      const { data: { session } } = await sb.auth.getSession();
+      setSession(session);
+    }
+
+    init();
+
     const { data: { subscription } } = sb.auth.onAuthStateChange((_event, session) => setSession(session));
     return () => subscription.unsubscribe();
   }, []);
